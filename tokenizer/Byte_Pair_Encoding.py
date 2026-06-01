@@ -1,36 +1,13 @@
 import importlib
-import torch
+
 import tiktoken
+import torch
 from torch.utils.data import Dataset, DataLoader
 
-tokenizer = tiktoken.get_encoding("gpt2")
-print("tiktoken version:", importlib.metadata.version("tiktoken"))
-
-text = "Hello, do you like tea? <|endoftext|> In the sunlit terracesof someunknownPlace."
-integers = tokenizer.encode(text, allowed_special={"<|endoftext|>"})
-print(integers)
-print(tokenizer.decode(integers))
-
-# BPE handles completely unknown words by splitting into subword units
-integers = tokenizer.encode("Akwirw ier")
-print(integers)
-print(tokenizer.decode(integers))
-
-with open("the-verdict.txt", "r", encoding="utf-8") as f:
-    raw_text = f.read()
-
-enc_text = tokenizer.encode(raw_text)
-enc_sample = enc_text[50:]
-
-context_size = 4
-for i in range(1, context_size + 1):
-    context = enc_sample[:i]
-    desired = enc_sample[i]
-    print(tokenizer.decode(context), "---->", tokenizer.decode([desired]))
 
 class GPTDatasetV1(Dataset):
     def __init__(self, txt, tokenizer, max_length, stride):
-        self.input_ids = []
+        self.input_ids  = []
         self.target_ids = []
         token_ids = tokenizer.encode(txt, allowed_special={"<|endoftext|>"})
         for i in range(0, len(token_ids) - max_length, stride):
@@ -44,36 +21,39 @@ class GPTDatasetV1(Dataset):
         return self.input_ids[idx], self.target_ids[idx]
 
 
-def create_dataloader_v1(txt, batch_size=4, max_length=256, stride=128,
-                         shuffle=True, drop_last=True, num_workers=0):
+def create_dataloader(txt, batch_size=4, max_length=256, stride=128,
+                      shuffle=True, drop_last=True, num_workers=0):
     tokenizer = tiktoken.get_encoding("gpt2")
-    dataset = GPTDatasetV1(txt, tokenizer, max_length, stride)
+    dataset   = GPTDatasetV1(txt, tokenizer, max_length, stride)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
                       drop_last=drop_last, num_workers=num_workers)
 
-dataloader = create_dataloader_v1(raw_text, batch_size=8, max_length=4, stride=4, shuffle=False)
-data_iter = iter(dataloader)
-inputs, targets = next(data_iter)
-print("Inputs:\n", inputs)
-print("\nTargets:\n", targets)
 
-vocab_size = 50257
-output_dim = 256
-token_embedding_layer = torch.nn.Embedding(vocab_size, output_dim)
+if __name__ == "__main__":
+    tokenizer = tiktoken.get_encoding("gpt2")
+    print("tiktoken version:", importlib.metadata.version("tiktoken"))
 
-max_length = 4
-dataloader = create_dataloader_v1(raw_text, batch_size=8, max_length=max_length,
-                                   stride=max_length, shuffle=False)
-data_iter = iter(dataloader)
-inputs, targets = next(data_iter)
+    text = "Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace."
+    ids = tokenizer.encode(text, allowed_special={"<|endoftext|>"})
+    print("Encoded:", ids)
+    print("Decoded:", tokenizer.decode(ids))
 
-token_embeddings = token_embedding_layer(inputs)
-print("Token embeddings shape:", token_embeddings.shape)
+    # BPE handles unknown words by splitting into subword units
+    print("Unknown word:", tokenizer.decode(tokenizer.encode("Akwirw ier")))
 
-context_length = max_length
-pos_embedding_layer = torch.nn.Embedding(context_length, output_dim)
-pos_embeddings = pos_embedding_layer(torch.arange(max_length))
-print("Pos embeddings shape:", pos_embeddings.shape)
+    with open("the-verdict.txt", "r", encoding="utf-8") as f:
+        raw_text = f.read()
 
-input_embeddings = token_embeddings + pos_embeddings
-print("Final input embeddings shape:", input_embeddings.shape)
+    dataloader = create_dataloader(raw_text, batch_size=8, max_length=4, stride=4, shuffle=False)
+    inputs, targets = next(iter(dataloader))
+    print("\nInputs shape:", inputs.shape)
+    print("Targets shape:", targets.shape)
+
+    # Token + positional embeddings
+    vocab_size    = 50257
+    output_dim    = 256
+    max_length    = 4
+    token_emb     = torch.nn.Embedding(vocab_size, output_dim)
+    pos_emb       = torch.nn.Embedding(max_length, output_dim)
+    input_embeds  = token_emb(inputs) + pos_emb(torch.arange(max_length))
+    print("Input embeddings shape:", input_embeds.shape)

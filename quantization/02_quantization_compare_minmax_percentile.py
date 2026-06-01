@@ -1,110 +1,51 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # Create a simple tensor with random items
-
-# In[6]:
-
-
 import numpy as np
 
-# Suppress scientific notation
+np.random.seed(0)
 np.set_printoptions(suppress=True)
 
-# Generate randomly distributed parameters
-params = np.random.uniform(low=-50, high=150, size=10000)
 
-# Introduce an outlier
-params[-1] = 1000
-
-# Round each number to the second decimal place
-params = np.round(params, 2)
-
-# Print the parameters
-print(params)
-
-
-# # Define the quantization methods and quantize
-
-# ## Compare min-max and percentile range selection strategies
-
-# In[7]:
-
-
-def clamp(params_q: np.array, lower_bound: int, upper_bound: int) -> np.array:
+def clamp(params_q, lower_bound, upper_bound):
     params_q[params_q < lower_bound] = lower_bound
     params_q[params_q > upper_bound] = upper_bound
     return params_q
 
-def asymmetric_quantization(params: np.array, bits: int) -> tuple[np.array, float, int]:
-    alpha = np.max(params)
-    beta = np.min(params)
-    scale = (alpha - beta) / (2**bits-1)
-    zero = -1*np.round(beta / scale)
-    lower_bound, upper_bound = 0, 2**bits-1
-    quantized = clamp(np.round(params / scale + zero), lower_bound, upper_bound).astype(np.int32)
-    return quantized, scale, zero
 
-def asymmetric_quantization_percentile(params: np.array, bits: int, percentile: float = 99.99) -> tuple[np.array, float, int]:
-    # find the percentile value
+def asymmetric_quantization(params, bits):
+    alpha, beta = np.max(params), np.min(params)
+    scale = (alpha - beta) / (2**bits - 1)
+    zero = -1 * np.round(beta / scale)
+    return clamp(np.round(params / scale + zero), 0, 2**bits - 1).astype(np.int32), scale, zero
+
+
+def asymmetric_quantization_percentile(params, bits, percentile=99.99):
     alpha = np.percentile(params, percentile)
-    beta = np.percentile(params, 100-percentile)
-    scale = (alpha - beta) / (2**bits-1)
-    zero = -1*np.round(beta / scale)
-    lower_bound, upper_bound = 0, 2**bits-1
-    quantized = clamp(np.round(params / scale + zero), lower_bound, upper_bound).astype(np.int32)
-    return quantized, scale, zero
+    beta  = np.percentile(params, 100 - percentile)
+    scale = (alpha - beta) / (2**bits - 1)
+    zero  = -1 * np.round(beta / scale)
+    return clamp(np.round(params / scale + zero), 0, 2**bits - 1).astype(np.int32), scale, zero
 
 
-def asymmetric_dequantize(params_q: np.array, scale: float, zero: int) -> np.array:
+def asymmetric_dequantize(params_q, scale, zero):
     return (params_q - zero) * scale
 
-def quantization_error(params: np.array, params_q: np.array):
-    # calculate the MSE
-    return np.mean((params - params_q)**2)
 
-(asymmetric_q, asymmetric_scale, asymmetric_zero) = asymmetric_quantization(params, 8)
-(asymmetric_q_percentile, asymmetric_scale_percentile, asymmetric_zero_percentile) = asymmetric_quantization_percentile(params, 8)
-
-print(f'Original:')
-print(np.round(params, 2))
-print('')
-print(f'Asymmetric (min-max) scale: {asymmetric_scale}, zero: {asymmetric_zero}')
-print(asymmetric_q)
-print(f'')
-print(f'Asymmetric (percentile) scale: {asymmetric_scale_percentile}, zero: {asymmetric_zero_percentile}')
-print(asymmetric_q_percentile)
+def quantization_error(params, params_deq):
+    return np.mean((params - params_deq) ** 2)
 
 
-# In[8]:
+if __name__ == "__main__":
+    params = np.random.uniform(low=-50, high=150, size=10000)
+    params[-1] = 1000  # outlier
+    params = np.round(params, 2)
 
+    q_minmax, scale_mm, zero_mm = asymmetric_quantization(params, 8)
+    q_pct,    scale_p,  zero_p  = asymmetric_quantization_percentile(params, 8)
 
-# Dequantize the parameters back to 32 bits
-params_deq_asymmetric = asymmetric_dequantize(asymmetric_q, asymmetric_scale, asymmetric_zero)
-params_deq_asymmetric_percentile = asymmetric_dequantize(asymmetric_q_percentile, asymmetric_scale_percentile, asymmetric_zero_percentile)
+    deq_minmax = asymmetric_dequantize(q_minmax, scale_mm, zero_mm)
+    deq_pct    = asymmetric_dequantize(q_pct,    scale_p,  zero_p)
 
-print(f'Original:')
-print(np.round(params, 2))
-print('')
-print(f'Dequantized (min-max):')
-print(np.round(params_deq_asymmetric,2))
-print('')
-print(f'Dequantized (percentile):')
-print(np.round(params_deq_asymmetric_percentile,2))
-
-
-# # Evaluate the quantization error (excluding the outlier)
-
-# In[9]:
-
-
-# Calculate the quantization error
-print(f'{"Error (min-max) excluding outlier: ":>40}{np.round(quantization_error(params[:-1], params_deq_asymmetric[:-1]),2)}')
-print(f'{"Error (percentile) excluding outlier: ":>40}{np.round(quantization_error(params[:-1], params_deq_asymmetric_percentile[:-1]),2)}')
-
-
-# In[ ]:
-
-
-
-
+    # Compare error excluding the outlier
+    err_mm  = quantization_error(params[:-1], deq_minmax[:-1])
+    err_pct = quantization_error(params[:-1], deq_pct[:-1])
+    print(f"Error (min-max, excl. outlier):    {err_mm:.4f}")
+    print(f"Error (percentile, excl. outlier): {err_pct:.4f}")
